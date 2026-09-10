@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#212121" />
+  <meta name="description" content="autotileset-generator by Zense — a local React pixel autotile generator for 15-piece, 17-piece, and 47-piece terrain sheets." />
+  <title>autotileset-generator — by Zense</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('autotileset-theme') === 'pink' ? 'pink' : 'dark'); } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
+  </script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+  <script src="./vendor/react.production.min.js"></script>
+  <script src="./vendor/react-dom.production.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
