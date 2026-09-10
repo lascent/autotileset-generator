@@ -163,15 +163,23 @@ function App() {
   const [settings, setSettings] = useState<RenderSettings>(DEFAULTS);
   const [zoom, setZoom] = useState(4);
   const [exportScale, setExportScale] = useState(1);
-  const [theme, setTheme] = useState<'dark' | 'pink'>(() => { try { return localStorage.getItem('autotileset-theme') === 'pink' ? 'pink' : 'dark'; } catch { return 'dark'; } });
+  const [theme, setTheme] = useState<'dark' | 'pink'>('dark');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previewFitRef = useRef<HTMLDivElement | null>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [previewShellWidth, setPreviewShellWidth] = useState(0);
 
   const effectiveTile = settings.tileSize;
   const grid = modeGrid(settings.mode);
   const native = sheetNativeSize({ ...settings, tileSize: effectiveTile });
   const nativeWidth = native.width;
   const nativeHeight = native.height;
+  const previewPadding = 12;
+  const desiredPreviewWidth = nativeWidth * zoom;
+  const maxPreviewCanvasWidth = previewShellWidth > 0 ? Math.max(120, previewShellWidth - previewPadding * 2) : desiredPreviewWidth;
+  const previewCanvasWidth = Math.min(desiredPreviewWidth, maxPreviewCanvasWidth);
+  const previewCanvasHeight = Math.round(previewCanvasWidth * (nativeHeight / Math.max(1, nativeWidth)));
+  const previewFrameWidth = previewCanvasWidth + previewPadding * 2;
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -210,6 +218,31 @@ function App() {
     };
   }, [settings, effectiveTile]);
 
+  useEffect(() => {
+    const node = previewFitRef.current;
+    if (!node) return;
+
+    const measure = () => {
+      const nextWidth = Math.round(node.clientWidth || 0);
+      setPreviewShellWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+    };
+
+    measure();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      observer.observe(node);
+    } else {
+      window.addEventListener('resize', measure);
+    }
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+
   function update<K extends keyof RenderSettings>(key: K, value: RenderSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }
@@ -221,6 +254,27 @@ function App() {
 
   function randomizeSeed() {
     update('seed', Math.floor(100000 + Math.random() * 899999));
+  }
+
+  function randomizeTexturePreset() {
+    setSettings((prev) => {
+      const rough = Math.random() < 0.78;
+      const rand = (min: number, max: number) => Math.floor(min + Math.random() * (max - min + 1));
+      return {
+        ...prev,
+        edgeStyle: rough ? 'rough' : 'clean',
+        cornerRadius: rand(0, 9),
+        tilePadding: rand(1, 4),
+        edgeNoise: rough ? rand(2, 9) : rand(0, 3),
+        noiseSize: rand(2, 11),
+        shades: rand(3, 8),
+        edgeFade: rand(1, 8),
+        textureNoise: rand(4, 32),
+        fleckAmount: rand(0, 18),
+        pixelFlecks: Math.random() < 0.82,
+        seed: Math.floor(100000 + Math.random() * 899999),
+      };
+    });
   }
 
   function reset() {
@@ -280,14 +334,13 @@ function App() {
             </div>
 
             <div className="control-block">
-              <div className="control-head compact">
-                <span className="control-label">Tile size</span>
-              </div>
+              <div className="control-head compact"><span className="control-label">Frame / tile size</span><span className="mini-badge">Synced</span></div>
               <Segmented
                 value={effectiveTile}
-                options={[{ label: '16x16', value: 16 }, { label: '32x32', value: 32 }, { label: '64x64', value: 64 }]}
+                options={[{ label: '16×16', value: 16 }, { label: '32×32', value: 32 }, { label: '64×64', value: 64 }]}
                 onChange={(value) => update('tileSize', value)}
               />
+              <span className="control-hint frame-hint">Every generated frame uses the selected square size.</span>
             </div>
 
             <div className="control-block">
@@ -338,12 +391,7 @@ function App() {
               <div className="control-head compact"><span className="control-label">Texture presets</span></div>
               <div className="texture-grid">
                 {TEXTURE_PRESETS.map((preset) => (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    className="texture-preset"
-                    onClick={() => setSettings((prev) => ({ ...prev, ...preset }))}
-                  >
+                  <button key={preset.name} type="button" className="texture-preset" onClick={() => setSettings((prev) => ({ ...prev, ...preset }))}>
                     {preset.name}
                   </button>
                 ))}
@@ -355,86 +403,110 @@ function App() {
             <Slider label="Texture noise" value={settings.textureNoise} min={0} max={32} onChange={(v) => update('textureNoise', v)} />
             <Slider label="Flecks" value={settings.fleckAmount} min={0} max={18} onChange={(v) => update('fleckAmount', v)} />
           </Section>
-
-          <Section eyebrow="03" title="Output">
-            <div className="seed-row seed-row-wide">
-              <label>
-                <span>Seed</span>
-                <input type="number" min={1} max={999999} value={settings.seed} onChange={(e) => update('seed', Math.max(1, Number(e.target.value) || 1))} />
-              </label>
-              <button type="button" className="seed-generate-btn" onClick={randomizeSeed} title="Generate a new random seed"><Icon name="dice" /> Generate Seeds</button>
-            </div>
-
-            <div className="switch-list">
-              <Switch label="White background" description="Off = transparent PNG" checked={settings.whiteBackground} onChange={(v) => update('whiteBackground', v)} />
-              <Switch label="Tile grid" description="#212121 · 1 px · off by default" checked={settings.showGrid} onChange={(v) => update('showGrid', v)} />
-              <Switch label="Pixel clusters" description="Adds seeded fleck groups" checked={settings.pixelFlecks} onChange={(v) => update('pixelFlecks', v)} />
-            </div>
-
-            <div className="control-block">
-              <div className="control-head compact"><span className="control-label">Export scale</span></div>
-              <Segmented
-                value={exportScale}
-                options={[{ label: '1×', value: 1 }, { label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '8×', value: 8 }]}
-                onChange={setExportScale}
-              />
-            </div>
-          </Section>
         </aside>
 
-        <section className="preview-panel">
-          <div className="preview-head">
-            <div>
-              <div className="eyebrow">LIVE SHEET</div>
-              <h1>{modeLabel(settings.mode)}</h1>
-              <p>{description}</p>
-            </div>
-            <div className="preview-meta">
-              <div><span>Pieces</span><strong>{modePieceCount(settings.mode)}</strong></div>
-              <div><span>Layout</span><strong>{grid.cols}×{grid.rows}</strong></div>
-              <div><span>Native</span><strong>{nativeWidth}×{nativeHeight}</strong></div>
-              <div><span>Tile</span><strong>{effectiveTile}px</strong></div>
-            </div>
-          </div>
-
-          <div className="canvas-toolbar">
-            <div className="sheet-chip"><Icon name="spark" /><span>Live tilesheet</span></div>
-            <div className="zoom-control">
-              <span>Preview</span>
-              <Segmented
-                value={zoom}
-                options={[{ label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '6×', value: 6 }, { label: '8×', value: 8 }]}
-                onChange={setZoom}
-              />
-            </div>
-          </div>
-
-          <div className="canvas-stage">
-            <section className="preview-card-ui main single-preview">
-              <div className="preview-card-head">
-                <div><strong>Live tilesheet</strong><p>This is the exact tilesheet generated from your current settings and exported as PNG.</p></div>
+        <div className="right-column">
+          <section className="preview-panel">
+            <div className="preview-head">
+              <div>
+                <div className="eyebrow">LIVE SHEET</div>
+                <h1>{modeLabel(settings.mode)}</h1>
+                <p>{description}</p>
               </div>
-              <div className={`canvas-frame ${settings.whiteBackground ? 'white' : 'transparent'}`}>
-                <canvas
-                  ref={canvasRef}
-                  style={{ width: `${nativeWidth * zoom}px`, height: `${nativeHeight * zoom}px` }}
-                  aria-label={`${modeLabel(settings.mode)} tileset preview`}
-                />
+              <div className="preview-meta">
+                <div><span>Pieces</span><strong>{modePieceCount(settings.mode)}</strong></div>
+                <div><span>Layout</span><strong>{grid.cols}×{grid.rows}</strong></div>
+                <div><span>Sheet</span><strong>{nativeWidth}×{nativeHeight}</strong></div>
+                <div><span>Frame</span><strong>{effectiveTile}×{effectiveTile}</strong></div>
               </div>
-              <div className="scene-note">Live export preview — change the template, palette, texture, seed, or size above to update it instantly.</div>
-            </section>
-          </div>
+            </div>
 
-          <div className="preview-footer">
-            <div className="accuracy-note"><Icon name="info" /><span><strong>Live export preview.</strong> The canvas above is the exact tilesheet that will be exported.</span></div>
-            <button className="primary-btn large" onClick={download}><Icon name="download" /> Export {exportScale}× PNG</button>
-          </div>
-        </section>
+            <div className="canvas-toolbar">
+              <div className="sheet-chip"><Icon name="spark" /><span>Auto-fit live PNG preview</span></div>
+              <div className="zoom-control">
+                <span>Max zoom</span>
+                <Segmented value={zoom} options={[{ label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '6×', value: 6 }, { label: '8×', value: 8 }]} onChange={setZoom} />
+              </div>
+            </div>
+
+            <div className="canvas-stage">
+              <section className="preview-card-ui main single-preview">
+                <div className="preview-card-head">
+                  <div><strong>Live tilesheet</strong><p>The frame grid, sheet dimensions, and PNG output stay synchronized with your selected tile size.</p></div>
+                  <div className="frame-sync-chip"><span>Frame</span><strong>{effectiveTile}×{effectiveTile}px</strong></div>
+                </div>
+                <div className="canvas-fit-shell" ref={previewFitRef}>
+                  <div
+                    className={`canvas-frame ${settings.whiteBackground ? 'white' : 'transparent'}`}
+                    style={{ width: `${previewFrameWidth}px`, padding: `${previewPadding}px` }}
+                  >
+                    <canvas
+                      ref={canvasRef}
+                      style={{ width: `${previewCanvasWidth}px`, height: `${previewCanvasHeight}px`, maxWidth: '100%' }}
+                      aria-label={`${modeLabel(settings.mode)} tileset preview`}
+                    />
+                  </div>
+                </div>
+                <div className="scene-note">Changes to Template or Palette & texture update this sheet instantly. Output and export controls are directly below.</div>
+              </section>
+            </div>
+          </section>
+
+          <section className="settings-card output-card">
+            <div className="section-title output-title">
+              <span>03</span>
+              <h2>Output & export</h2>
+              <div className="sync-status"><i /> Frame sizes synced</div>
+            </div>
+            <div className="section-content output-content">
+              <div className="output-group">
+                <div className="output-group-head"><strong>Variation</strong><span>Seeded texture</span></div>
+                <div className="seed-row seed-row-wide">
+                  <label><span>Seed</span><input type="number" min={1} max={999999} value={settings.seed} onChange={(e) => update('seed', Math.max(1, Number(e.target.value) || 1))} /></label>
+                  <button type="button" className="seed-generate-btn" onClick={randomizeSeed} title="Generate a new random seed"><Icon name="dice" /> New seed</button>
+                </div>
+                <button
+                  type="button"
+                  className="random-texture-btn"
+                  onClick={randomizeTexturePreset}
+                  title="Generate randomized texture settings while preserving template, frame size, and palette colors"
+                >
+                  <Icon name="spark" />
+                  <span>Random Texture Presets</span>
+                  <small>New texture mix</small>
+                </button>
+              </div>
+
+              <div className="output-group">
+                <div className="output-group-head"><strong>PNG options</strong><span>Applied live</span></div>
+                <div className="switch-list compact-switches">
+                  <Switch label="White background" description="Off = transparent" checked={settings.whiteBackground} onChange={(v) => update('whiteBackground', v)} />
+                  <Switch label="Tile grid" description="#212121 · 1 px" checked={settings.showGrid} onChange={(v) => update('showGrid', v)} />
+                  <Switch label="Pixel clusters" description="Seeded fleck groups" checked={settings.pixelFlecks} onChange={(v) => update('pixelFlecks', v)} />
+                </div>
+              </div>
+
+              <div className="output-group export-group">
+                <div className="output-group-head"><strong>Export</strong><span>Nearest-neighbor scale</span></div>
+                <div className="control-block">
+                  <div className="control-head compact"><span className="control-label">Export scale</span></div>
+                  <Segmented value={exportScale} options={[{ label: '1×', value: 1 }, { label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '8×', value: 8 }]} onChange={setExportScale} />
+                </div>
+                <div className="size-sync-grid">
+                  <div><span>Source frame</span><strong>{effectiveTile}×{effectiveTile}px</strong></div>
+                  <div><span>Export frame</span><strong>{effectiveTile * exportScale}×{effectiveTile * exportScale}px</strong></div>
+                  <div><span>Export sheet</span><strong>{nativeWidth * exportScale}×{nativeHeight * exportScale}px</strong></div>
+                </div>
+                <button className="primary-btn large export-main-btn" onClick={download}><Icon name="download" /> Export {exportScale}× PNG</button>
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
 
       <footer className="app-footer">
         <span>autotileset-generator · Made by Zense · React + TypeScript + Canvas</span>
-        <span>GitHub Pages ready · Dark and light mode included</span>
+        <span>GitHub Pages ready · Dark and Pink modes included</span>
       </footer>
     </div>
   );

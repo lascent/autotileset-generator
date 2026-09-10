@@ -625,21 +625,26 @@ function Section(props) {
         React.createElement("div", { className: "section-content" }, props.children));
 }
 function getInitialTheme() {
-    try { return localStorage.getItem('autotileset-theme') === 'pink' ? 'pink' : 'dark'; }
-    catch (_) { return 'dark'; }
+    return 'dark';
 }
 class App extends React.Component {
     constructor() {
         super(...arguments);
-        this.state = { settings: Object.assign({}, DEFAULTS), zoom: 4, exportScale: 1, theme: getInitialTheme() };
+        this.state = { settings: Object.assign({}, DEFAULTS), zoom: 4, exportScale: 1, theme: getInitialTheme(), previewShellWidth: 0 };
         this.canvasNode = null;
+        this.previewShellNode = null;
+        this.previewResizeObserver = null;
+        this.observedPreviewShellNode = null;
         this.sourceCanvas = null;
         this.drawFrame = 0;
+        this.handlePreviewResize = () => this.measurePreviewShell();
     }
-    componentDidMount() { this.applyTheme(); this.scheduleDraw(); }
-    componentDidUpdate() { this.applyTheme(); this.scheduleDraw(); }
+    componentDidMount() { this.applyTheme(); this.attachPreviewObserver(); this.scheduleDraw(); }
+    componentDidUpdate() { this.applyTheme(); this.attachPreviewObserver(); this.scheduleDraw(); }
     componentWillUnmount() {
         if (this.drawFrame) cancelAnimationFrame(this.drawFrame);
+        if (this.previewResizeObserver) this.previewResizeObserver.disconnect();
+        window.removeEventListener('resize', this.handlePreviewResize);
     }
     scheduleDraw() {
         if (this.drawFrame) cancelAnimationFrame(this.drawFrame);
@@ -653,6 +658,28 @@ class App extends React.Component {
         try { localStorage.setItem('autotileset-theme', this.state.theme); } catch (_) {}
     }
     toggleTheme() { this.setState((prev) => ({ theme: prev.theme === 'dark' ? 'pink' : 'dark' })); }
+    attachPreviewObserver() {
+        if (!this.previewShellNode || this.observedPreviewShellNode === this.previewShellNode) return;
+        if (this.previewResizeObserver) {
+            this.previewResizeObserver.disconnect();
+            this.previewResizeObserver = null;
+        }
+        window.removeEventListener('resize', this.handlePreviewResize);
+        this.observedPreviewShellNode = this.previewShellNode;
+        if (typeof ResizeObserver !== 'undefined') {
+            this.previewResizeObserver = new ResizeObserver(this.handlePreviewResize);
+            this.previewResizeObserver.observe(this.previewShellNode);
+        } else {
+            window.addEventListener('resize', this.handlePreviewResize);
+        }
+        this.measurePreviewShell();
+    }
+    measurePreviewShell() {
+        const nextWidth = Math.round(((this.previewShellNode && this.previewShellNode.clientWidth) || 0));
+        if (nextWidth && nextWidth !== this.state.previewShellWidth) {
+            this.setState({ previewShellWidth: nextWidth });
+        }
+    }
     effectiveTile() { return this.state.settings.tileSize; }
     draw() {
         const settings = this.state.settings;
@@ -675,6 +702,28 @@ class App extends React.Component {
         this.setState((prev) => ({ settings: Object.assign(Object.assign({}, prev.settings), { mode }) }));
     }
     randomizeSeed() { this.update('seed', Math.floor(100000 + Math.random() * 899999)); }
+    randomizeTexturePreset() {
+        this.setState((prev) => {
+            const rough = Math.random() < 0.78;
+            const nextSeed = Math.floor(100000 + Math.random() * 899999);
+            const rand = (min, max) => Math.floor(min + Math.random() * (max - min + 1));
+            return {
+                settings: Object.assign(Object.assign({}, prev.settings), {
+                    edgeStyle: rough ? 'rough' : 'clean',
+                    cornerRadius: rand(0, 9),
+                    tilePadding: rand(1, 4),
+                    edgeNoise: rough ? rand(2, 9) : rand(0, 3),
+                    noiseSize: rand(2, 11),
+                    shades: rand(3, 8),
+                    edgeFade: rand(1, 8),
+                    textureNoise: rand(4, 32),
+                    fleckAmount: rand(0, 18),
+                    pixelFlecks: Math.random() < 0.82,
+                    seed: nextSeed
+                })
+            };
+        });
+    }
     reset() { this.setState((prev) => ({ settings: Object.assign({}, DEFAULTS), zoom: 4, exportScale: 1, theme: prev.theme })); }
     download() {
         if (!this.sourceCanvas)
@@ -698,145 +747,148 @@ class App extends React.Component {
         const native = sheetNativeSize(Object.assign(Object.assign({}, settings), { tileSize: effectiveTile }));
         const nativeWidth = native.width;
         const nativeHeight = native.height;
+        const previewPadding = 12;
+        const desiredPreviewWidth = nativeWidth * this.state.zoom;
+        const maxPreviewCanvasWidth = this.state.previewShellWidth > 0 ? Math.max(120, this.state.previewShellWidth - previewPadding * 2) : desiredPreviewWidth;
+        const previewCanvasWidth = Math.min(desiredPreviewWidth, maxPreviewCanvasWidth);
+        const previewCanvasHeight = Math.round(previewCanvasWidth * (nativeHeight / Math.max(1, nativeWidth)));
+        const previewFrameWidth = previewCanvasWidth + previewPadding * 2;
         const description = settings.mode === 'topdown-15'
             ? '4-corner Wang / dual-grid base. 15 visible pieces + one empty slot.'
             : settings.mode === 'topdown-17'
                 ? '5×5 guide: 3×3 island, strokes, isolated tile, and inner-corner helper.'
                 : '12×4 blob sheet with 47 valid top-down autotile pieces plus one blank slot.';
-        return React.createElement("div", { className: "app-shell" },
-            React.createElement("header", { className: "topbar" },
-                React.createElement("div", { className: "brand-lockup" },
-                    React.createElement("div", { className: "brand-mark" },
-                        React.createElement("img", { src: "./resources/zense-logo.png", alt: "Zense logo" })),
-                    React.createElement("div", null,
-                        React.createElement("div", { className: "brand-line" },
-                            React.createElement("strong", null, "autotileset-generator"),
-                            React.createElement("span", null, "by Zense")),
-                        React.createElement("p", null, "Friendly pixel-perfect autotile generator"))),
-                React.createElement("div", { className: "topbar-actions" },
-                    React.createElement("span", { className: "status-chip" },
-                        React.createElement("i", null),
-                        " Local renderer"),
-                    React.createElement("button", { className: "theme-btn", onClick: () => this.toggleTheme(), title: this.state.theme === 'dark' ? 'Switch to Pink mode' : 'Switch to Dark mode' },
-                        React.createElement(Icon, { name: this.state.theme === 'dark' ? 'spark' : 'moon' }),
-                        this.state.theme === 'dark' ? ' Pink' : ' Dark'),
-                    React.createElement("button", { className: "ghost-btn", onClick: () => this.reset() },
-                        React.createElement(Icon, { name: "reset" }),
-                        " Reset"),
-                    React.createElement("button", { className: "primary-btn", onClick: () => this.download() },
-                        React.createElement(Icon, { name: "download" }),
-                        " Export PNG"))),
-            React.createElement("main", { className: "workspace" },
-                React.createElement("aside", { className: "sidebar" },
-                    React.createElement(Section, { eyebrow: "01", title: "Template" },
-                        React.createElement("div", { className: "control-block" },
-                            React.createElement("div", { className: "control-head compact" },
-                                React.createElement("span", { className: "control-label" }, "Piece set")),
-                            React.createElement(Segmented, { value: settings.mode, options: [{ label: '15-piece', value: 'topdown-15' }, { label: '17-piece', value: 'topdown-17' }, { label: '47-piece', value: 'topdown-47' }], onChange: (v) => this.chooseMode(v) })),
-                        React.createElement("div", { className: "control-block" },
-                            React.createElement("div", { className: "control-head compact" },
-                                React.createElement("span", { className: "control-label" }, "Tile size")),
-                            React.createElement(Segmented, { value: effectiveTile, options: [{ label: '16x16', value: 16 }, { label: '32x32', value: 32 }, { label: '64x64', value: 64 }], onChange: (v) => this.update('tileSize', v) })),
-                        React.createElement("div", { className: "control-block" },
-                            React.createElement("div", { className: "control-head compact" },
-                                React.createElement("span", { className: "control-label" }, "Edge style")),
-                            React.createElement(Segmented, { value: settings.edgeStyle, options: [{ label: 'Rough', value: 'rough' }, { label: 'Clean', value: 'clean' }], onChange: (v) => this.update('edgeStyle', v) })),
-                        React.createElement(Slider, { label: "Corner radius", value: settings.cornerRadius, min: 0, max: 12, onChange: (v) => this.update('cornerRadius', v) }),
-                        React.createElement(Slider, { label: "Tile padding", value: settings.tilePadding, min: 1, max: 6, onChange: (v) => this.update('tilePadding', v), hint: "Inset on open edges" }),
-                        React.createElement(Slider, { label: "Edge noise", value: settings.edgeNoise, min: 0, max: 10, onChange: (v) => this.update('edgeNoise', v) }),
-                        React.createElement(Slider, { label: "Noise size", value: settings.noiseSize, min: 1, max: 12, onChange: (v) => this.update('noiseSize', v) })),
-                    React.createElement(Section, { eyebrow: "02", title: "Palette & texture" },
-                        React.createElement("div", { className: "color-grid" },
-                            React.createElement(ColorField, { label: "Base", value: settings.baseColor, onChange: (v) => this.update('baseColor', v) }),
-                            React.createElement(ColorField, { label: "Edge", value: settings.edgeColor, onChange: (v) => this.update('edgeColor', v) }),
-                            React.createElement(ColorField, { label: "Accent", value: settings.surfaceColor, onChange: (v) => this.update('surfaceColor', v) })),
-                        React.createElement("div", { className: "control-block" },
-                            React.createElement("div", { className: "control-head compact" },
-                                React.createElement("span", { className: "control-label" }, "Presets")),
-                            React.createElement("div", { className: "preset-grid" }, PRESETS.map((p) => React.createElement("button", { key: p.name, type: "button", className: "preset", title: `${p.name} · ${p.base} · ${p.edge} · ${p.surface}`, onClick: () => this.setState((prev) => ({ settings: Object.assign(Object.assign({}, prev.settings), { baseColor: p.base, edgeColor: p.edge, surfaceColor: p.surface }) })) },
-                                React.createElement("span", { className: "preset-swatches" },
-                                    React.createElement("i", { style: { background: p.edge } }),
-                                    React.createElement("i", { style: { background: p.base } }),
-                                    React.createElement("i", { style: { background: p.surface } })),
-                                React.createElement("em", null, p.name))))),
-                        React.createElement("div", { className: "control-block" },
-                            React.createElement("div", { className: "control-head compact" },
-                                React.createElement("span", { className: "control-label" }, "Texture presets")),
-                            React.createElement("div", { className: "texture-grid" }, TEXTURE_PRESETS.map((p) => React.createElement("button", { key: p.name, type: "button", className: "texture-preset", onClick: () => this.setState((prev) => ({ settings: Object.assign(Object.assign({}, prev.settings), p) })) }, p.name)))),
-                        React.createElement(Slider, { label: "Shades", value: settings.shades, min: 2, max: 8, onChange: (v) => this.update('shades', v) }),
-                        React.createElement(Slider, { label: "Edge fade", value: settings.edgeFade, min: 0, max: 10, onChange: (v) => this.update('edgeFade', v) }),
-                        React.createElement(Slider, { label: "Texture noise", value: settings.textureNoise, min: 0, max: 32, onChange: (v) => this.update('textureNoise', v) }),
-                        React.createElement(Slider, { label: "Flecks", value: settings.fleckAmount, min: 0, max: 18, onChange: (v) => this.update('fleckAmount', v) })),
-                    React.createElement(Section, { eyebrow: "03", title: "Output" },
-                        React.createElement("div", { className: "seed-row seed-row-wide" },
-                            React.createElement("label", null,
-                                React.createElement("span", null, "Seed"),
-                                React.createElement("input", { type: "number", min: 1, max: 999999, value: settings.seed, onChange: (e) => this.update('seed', Math.max(1, Number(e.target.value) || 1)) })),
-                            React.createElement("button", { type: "button", className: "seed-generate-btn", onClick: () => this.randomizeSeed(), title: "Generate a new random seed" },
-                                React.createElement(Icon, { name: "dice" }),
-                                " Generate Seeds")),
-                        React.createElement("div", { className: "switch-list" },
-                            React.createElement(Switch, { label: "White background", description: "Off = transparent PNG", checked: settings.whiteBackground, onChange: (v) => this.update('whiteBackground', v) }),
-                            React.createElement(Switch, { label: "Tile grid", description: "#212121 · 1 px · off by default", checked: settings.showGrid, onChange: (v) => this.update('showGrid', v) }),
-                            React.createElement(Switch, { label: "Pixel clusters", description: "Adds seeded fleck groups", checked: settings.pixelFlecks, onChange: (v) => this.update('pixelFlecks', v) })),
-                        React.createElement("div", { className: "control-block" },
-                            React.createElement("div", { className: "control-head compact" },
-                                React.createElement("span", { className: "control-label" }, "Export scale")),
-                            React.createElement(Segmented, { value: this.state.exportScale, options: [{ label: '1×', value: 1 }, { label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '8×', value: 8 }], onChange: (v) => this.setState({ exportScale: v }) })))),
-                React.createElement("section", { className: "preview-panel" },
-                    React.createElement("div", { className: "preview-head" },
-                        React.createElement("div", null,
-                            React.createElement("div", { className: "eyebrow" }, "LIVE SHEET"),
-                            React.createElement("h1", null, modeLabel(settings.mode)),
-                            React.createElement("p", null, description)),
-                        React.createElement("div", { className: "preview-meta" },
-                            React.createElement("div", null,
-                                React.createElement("span", null, 'Pieces'),
-                                React.createElement("strong", null, modePieceCount(settings.mode))),
-                            React.createElement("div", null,
-                                React.createElement("span", null, 'Layout'),
-                                React.createElement("strong", null, `${grid.cols}×${grid.rows}`)),
-                            React.createElement("div", null,
-                                React.createElement("span", null, "Native"),
-                                React.createElement("strong", null,
-                                    nativeWidth,
-                                    "\u00D7",
-                                    nativeHeight)),
-                            React.createElement("div", null,
-                                React.createElement("span", null, "Tile"),
-                                React.createElement("strong", null,
-                                    effectiveTile,
-                                    "px")))),
-                    React.createElement("div", { className: "canvas-toolbar" },
-                        React.createElement("div", { className: "sheet-chip" },
-                            React.createElement(Icon, { name: "spark" }),
-                            React.createElement("span", null, 'Live tilesheet')), 
-                        React.createElement("div", { className: "zoom-control" },
-                            React.createElement("span", null, "Preview"),
-                            React.createElement(Segmented, { value: this.state.zoom, options: [{ label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '6×', value: 6 }, { label: '8×', value: 8 }], onChange: (v) => this.setState({ zoom: v }) }))),
-                    React.createElement("div", { className: "canvas-stage" },
-                        React.createElement("section", { className: "preview-card-ui main single-preview" },
-                            React.createElement("div", { className: "preview-card-head" },
-                                React.createElement("div", null,
-                                    React.createElement("strong", null, "Live tilesheet"),
-                                    React.createElement("p", null, "This is the exact tilesheet generated from your current settings and exported as PNG."))),
-                            React.createElement("div", { className: `canvas-frame ${settings.whiteBackground ? 'white' : 'transparent'}` },
-                                React.createElement("canvas", { ref: (node) => { this.canvasNode = node; }, style: { width: `${nativeWidth * this.state.zoom}px`, height: `${nativeHeight * this.state.zoom}px` } })),
-                            React.createElement("div", { className: "scene-note" }, "Live export preview — change the template, palette, texture, seed, or size above to update it instantly."))),
-                    React.createElement("div", { className: "preview-footer" },
-                        React.createElement("div", { className: "accuracy-note" },
-                            React.createElement(Icon, { name: "info" }),
-                            React.createElement("span", null,
-                                React.createElement("strong", null, 'Live export preview.'),
-                                ' The canvas above is the exact tilesheet that will be exported.')), 
-                        React.createElement("button", { className: "primary-btn large", onClick: () => this.download() },
-                            React.createElement(Icon, { name: "download" }),
-                            " Export ",
-                            this.state.exportScale,
-                            "\u00D7 PNG")))),
-            React.createElement("footer", { className: "app-footer" },
-                React.createElement("span", null, "autotileset-generator \u00B7 Made by Zense \u00B7 React + TypeScript + Canvas"),
-                React.createElement("span", null, "GitHub Pages ready \u00B7 Dark and light mode included")));
+        const h = React.createElement;
+
+        const header = h("header", { className: "topbar" },
+            h("div", { className: "brand-lockup" },
+                h("div", { className: "brand-mark" }, h("img", { src: "./resources/zense-logo.png", alt: "Zense logo" })),
+                h("div", null,
+                    h("div", { className: "brand-line" }, h("strong", null, "autotileset-generator"), h("span", null, "by Zense")),
+                    h("p", null, "Friendly pixel-perfect autotile generator"))),
+            h("div", { className: "topbar-actions" },
+                h("span", { className: "status-chip" }, h("i", null), " Local renderer"),
+                h("button", { className: "theme-btn", onClick: () => this.toggleTheme(), title: this.state.theme === 'dark' ? 'Switch to Pink mode' : 'Switch to Dark mode' }, h(Icon, { name: this.state.theme === 'dark' ? 'spark' : 'moon' }), this.state.theme === 'dark' ? ' Pink' : ' Dark'),
+                h("button", { className: "ghost-btn", onClick: () => this.reset() }, h(Icon, { name: "reset" }), " Reset"),
+                h("button", { className: "primary-btn", onClick: () => this.download() }, h(Icon, { name: "download" }), " Export PNG")));
+
+        const template = h(Section, { eyebrow: "01", title: "Template" },
+            h("div", { className: "control-block" },
+                h("div", { className: "control-head compact" }, h("span", { className: "control-label" }, "Piece set")),
+                h(Segmented, { value: settings.mode, options: [{ label: '15-piece', value: 'topdown-15' }, { label: '17-piece', value: 'topdown-17' }, { label: '47-piece', value: 'topdown-47' }], onChange: (v) => this.chooseMode(v) })),
+            h("div", { className: "control-block" },
+                h("div", { className: "control-head compact" }, h("span", { className: "control-label" }, "Frame / tile size"), h("span", { className: "mini-badge" }, "Synced")),
+                h(Segmented, { value: effectiveTile, options: [{ label: '16×16', value: 16 }, { label: '32×32', value: 32 }, { label: '64×64', value: 64 }], onChange: (v) => this.update('tileSize', v) }),
+                h("span", { className: "control-hint frame-hint" }, "Every generated frame uses the selected square size.")),
+            h("div", { className: "control-block" },
+                h("div", { className: "control-head compact" }, h("span", { className: "control-label" }, "Edge style")),
+                h(Segmented, { value: settings.edgeStyle, options: [{ label: 'Rough', value: 'rough' }, { label: 'Clean', value: 'clean' }], onChange: (v) => this.update('edgeStyle', v) })),
+            h(Slider, { label: "Corner radius", value: settings.cornerRadius, min: 0, max: 12, onChange: (v) => this.update('cornerRadius', v) }),
+            h(Slider, { label: "Tile padding", value: settings.tilePadding, min: 1, max: 6, onChange: (v) => this.update('tilePadding', v), hint: "Inset on open edges" }),
+            h(Slider, { label: "Edge noise", value: settings.edgeNoise, min: 0, max: 10, onChange: (v) => this.update('edgeNoise', v) }),
+            h(Slider, { label: "Noise size", value: settings.noiseSize, min: 1, max: 12, onChange: (v) => this.update('noiseSize', v) }));
+
+        const palette = h(Section, { eyebrow: "02", title: "Palette & texture" },
+            h("div", { className: "color-grid" },
+                h(ColorField, { label: "Base", value: settings.baseColor, onChange: (v) => this.update('baseColor', v) }),
+                h(ColorField, { label: "Edge", value: settings.edgeColor, onChange: (v) => this.update('edgeColor', v) }),
+                h(ColorField, { label: "Accent", value: settings.surfaceColor, onChange: (v) => this.update('surfaceColor', v) })),
+            h("div", { className: "control-block" },
+                h("div", { className: "control-head compact" }, h("span", { className: "control-label" }, "Presets")),
+                h("div", { className: "preset-grid" }, PRESETS.map((p) => h("button", {
+                    key: p.name,
+                    type: "button",
+                    className: "preset",
+                    title: `${p.name} · ${p.base} · ${p.edge} · ${p.surface}`,
+                    onClick: () => this.setState((prev) => ({ settings: Object.assign(Object.assign({}, prev.settings), { baseColor: p.base, edgeColor: p.edge, surfaceColor: p.surface }) }))
+                },
+                    h("span", { className: "preset-swatches" }, h("i", { style: { background: p.edge } }), h("i", { style: { background: p.base } }), h("i", { style: { background: p.surface } })),
+                    h("em", null, p.name))))),
+            h("div", { className: "control-block" },
+                h("div", { className: "control-head compact" }, h("span", { className: "control-label" }, "Texture presets")),
+                h("div", { className: "texture-grid" }, TEXTURE_PRESETS.map((p) => h("button", {
+                    key: p.name,
+                    type: "button",
+                    className: "texture-preset",
+                    onClick: () => this.setState((prev) => ({ settings: Object.assign(Object.assign({}, prev.settings), p) }))
+                }, p.name)))),
+            h(Slider, { label: "Shades", value: settings.shades, min: 2, max: 8, onChange: (v) => this.update('shades', v) }),
+            h(Slider, { label: "Edge fade", value: settings.edgeFade, min: 0, max: 10, onChange: (v) => this.update('edgeFade', v) }),
+            h(Slider, { label: "Texture noise", value: settings.textureNoise, min: 0, max: 32, onChange: (v) => this.update('textureNoise', v) }),
+            h(Slider, { label: "Flecks", value: settings.fleckAmount, min: 0, max: 18, onChange: (v) => this.update('fleckAmount', v) }));
+
+        const preview = h("section", { className: "preview-panel" },
+            h("div", { className: "preview-head" },
+                h("div", null,
+                    h("div", { className: "eyebrow" }, "LIVE SHEET"),
+                    h("h1", null, modeLabel(settings.mode)),
+                    h("p", null, description)),
+                h("div", { className: "preview-meta" },
+                    h("div", null, h("span", null, "Pieces"), h("strong", null, modePieceCount(settings.mode))),
+                    h("div", null, h("span", null, "Layout"), h("strong", null, `${grid.cols}×${grid.rows}`)),
+                    h("div", null, h("span", null, "Sheet"), h("strong", null, `${nativeWidth}×${nativeHeight}`)),
+                    h("div", null, h("span", null, "Frame"), h("strong", null, `${effectiveTile}×${effectiveTile}`)))),
+            h("div", { className: "canvas-toolbar" },
+                h("div", { className: "sheet-chip" }, h(Icon, { name: "spark" }), h("span", null, "Auto-fit live PNG preview")),
+                h("div", { className: "zoom-control" },
+                    h("span", null, "Max zoom"),
+                    h(Segmented, { value: this.state.zoom, options: [{ label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '6×', value: 6 }, { label: '8×', value: 8 }], onChange: (v) => this.setState({ zoom: v }) }))),
+            h("div", { className: "canvas-stage" },
+                h("section", { className: "preview-card-ui main single-preview" },
+                    h("div", { className: "preview-card-head" },
+                        h("div", null,
+                            h("strong", null, "Live tilesheet"),
+                            h("p", null, "The frame grid, sheet dimensions, and PNG output stay synchronized with your selected tile size.")),
+                        h("div", { className: "frame-sync-chip" }, h("span", null, "Frame"), h("strong", null, `${effectiveTile}×${effectiveTile}px`))),
+                    h("div", { className: "canvas-fit-shell", ref: (node) => { this.previewShellNode = node; } },
+                        h("div", { className: `canvas-frame ${settings.whiteBackground ? 'white' : 'transparent'}`, style: { width: `${previewFrameWidth}px`, padding: `${previewPadding}px` } },
+                            h("canvas", {
+                                ref: (node) => { this.canvasNode = node; },
+                                style: { width: `${previewCanvasWidth}px`, height: `${previewCanvasHeight}px`, maxWidth: "100%" },
+                                "aria-label": `${modeLabel(settings.mode)} tileset preview`
+                            }))),
+                    h("div", { className: "scene-note" }, "Changes to Template or Palette & texture update this sheet instantly. Output and export controls are directly below."))));
+
+        const output = h("section", { className: "settings-card output-card" },
+            h("div", { className: "section-title output-title" },
+                h("span", null, "03"),
+                h("h2", null, "Output & export"),
+                h("div", { className: "sync-status" }, h("i", null), " Frame sizes synced")),
+            h("div", { className: "section-content output-content" },
+                h("div", { className: "output-group" },
+                    h("div", { className: "output-group-head" }, h("strong", null, "Variation"), h("span", null, "Seeded texture")),
+                    h("div", { className: "seed-row seed-row-wide" },
+                        h("label", null,
+                            h("span", null, "Seed"),
+                            h("input", { type: "number", min: 1, max: 999999, value: settings.seed, onChange: (e) => this.update('seed', Math.max(1, Number(e.target.value) || 1)) })),
+                        h("button", { type: "button", className: "seed-generate-btn", onClick: () => this.randomizeSeed(), title: "Generate a new random seed" }, h(Icon, { name: "dice" }), " New seed")),
+                    h("button", { type: "button", className: "random-texture-btn", onClick: () => this.randomizeTexturePreset(), title: "Generate randomized texture settings while preserving template, frame size, and palette colors" }, h(Icon, { name: "spark" }), h("span", null, "Random Texture Presets"), h("small", null, "New texture mix"))),
+                h("div", { className: "output-group" },
+                    h("div", { className: "output-group-head" }, h("strong", null, "PNG options"), h("span", null, "Applied live")),
+                    h("div", { className: "switch-list compact-switches" },
+                        h(Switch, { label: "White background", description: "Off = transparent", checked: settings.whiteBackground, onChange: (v) => this.update('whiteBackground', v) }),
+                        h(Switch, { label: "Tile grid", description: "#212121 · 1 px", checked: settings.showGrid, onChange: (v) => this.update('showGrid', v) }),
+                        h(Switch, { label: "Pixel clusters", description: "Seeded fleck groups", checked: settings.pixelFlecks, onChange: (v) => this.update('pixelFlecks', v) }))),
+                h("div", { className: "output-group export-group" },
+                    h("div", { className: "output-group-head" }, h("strong", null, "Export"), h("span", null, "Nearest-neighbor scale")),
+                    h("div", { className: "control-block" },
+                        h("div", { className: "control-head compact" }, h("span", { className: "control-label" }, "Export scale")),
+                        h(Segmented, { value: this.state.exportScale, options: [{ label: '1×', value: 1 }, { label: '2×', value: 2 }, { label: '4×', value: 4 }, { label: '8×', value: 8 }], onChange: (v) => this.setState({ exportScale: v }) })),
+                    h("div", { className: "size-sync-grid" },
+                        h("div", null, h("span", null, "Source frame"), h("strong", null, `${effectiveTile}×${effectiveTile}px`)),
+                        h("div", null, h("span", null, "Export frame"), h("strong", null, `${effectiveTile * this.state.exportScale}×${effectiveTile * this.state.exportScale}px`)),
+                        h("div", null, h("span", null, "Export sheet"), h("strong", null, `${nativeWidth * this.state.exportScale}×${nativeHeight * this.state.exportScale}px`))),
+                    h("button", { className: "primary-btn large export-main-btn", onClick: () => this.download() }, h(Icon, { name: "download" }), " Export ", this.state.exportScale, "× PNG"))));
+
+        const main = h("main", { className: "workspace" },
+            h("aside", { className: "sidebar" }, template, palette),
+            h("div", { className: "right-column" }, preview, output));
+
+        const footer = h("footer", { className: "app-footer" },
+            h("span", null, "autotileset-generator · Made by Zense · React + TypeScript + Canvas"),
+            h("span", null, "GitHub Pages ready · Dark and Pink modes included"));
+
+        return h("div", { className: "app-shell" }, header, main, footer);
     }
 }
 ReactDOM.render(React.createElement(App, null), document.getElementById('root'));
