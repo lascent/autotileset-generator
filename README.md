@@ -4,6 +4,26 @@
 
 A modern, local-first pixel autotile generator built with React, TypeScript, Vite, and HTML Canvas. It creates 15-piece, 17-piece, and 47-piece top-down tilesets with a single live export preview.
 
+## Preview
+
+### Autotileset Generator
+
+<p align="center">
+  <img src="resources/screenshots/generator-preview.png" alt="Autotileset Generator interface" width="100%">
+</p>
+
+### 47-Piece Autotileset
+
+<p align="center">
+  <img src="resources/screenshots/47-piece-preview.png" alt="47-piece autotileset live preview" width="100%">
+</p>
+
+### Output & Export
+
+<p align="center">
+  <img src="resources/screenshots/export-preview.png" alt="Output and export controls" width="100%">
+</p>
+
 ## Features
 
 - 15-piece top-down autotile template
@@ -41,7 +61,8 @@ autotileset-generator/
 │       └── pages.yml
 ├── resources/
 │   ├── README.md
-│   └── examples/
+│   ├── examples/
+│   └── screenshots/
 ├── react-source/
 │   ├── src/
 │   │   ├── generator.ts
